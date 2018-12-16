@@ -57,6 +57,10 @@ func resourceVcdVApp() *schema.Resource {
 				Type:     schema.TypeInt,
 				Optional: true,
 			},
+			"disk": {
+				Type:     schema.TypeInt,
+				Optional: true,
+			},
 			"ip": {
 				Type:     schema.TypeString,
 				Optional: true,
@@ -196,50 +200,6 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 			if err != nil {
 				return fmt.Errorf("error changing network: %#v", err)
 			}
-
-			if ovf, ok := d.GetOk("ovf"); ok {
-				err := retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
-					task, err := vapp.SetOvf(convertToStringMap(ovf.(map[string]interface{})))
-
-					if err != nil {
-						return resource.RetryableError(fmt.Errorf("error set ovf: %#v", err))
-					}
-					return resource.RetryableError(task.WaitTaskCompletion())
-				})
-				if err != nil {
-					return fmt.Errorf("error completing tasks: %#v", err)
-				}
-			}
-
-			if d.Get("power_on").(bool) == true {
-				err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
-					task, err := vapp.PowerOn()
-					if err != nil {
-						return resource.RetryableError(fmt.Errorf("error powerOn machine: %#v", err))
-					}
-					return resource.RetryableError(task.WaitTaskCompletion())
-				})
-
-				if err != nil {
-					return fmt.Errorf("error completing powerOn tasks: %#v", err)
-				}
-			}
-
-			initscript, ok := d.GetOk("initscript")
-			if ok {
-				err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
-					log.Printf("running customisation script")
-					task, err := vapp.RunCustomizationScript(d.Get("name").(string), initscript.(string))
-					if err != nil {
-						return resource.RetryableError(fmt.Errorf("error with setting init script: %#v", err))
-					}
-					return resource.RetryableError(task.WaitTaskCompletion())
-				})
-				if err != nil {
-					return fmt.Errorf(errorCompletingTask, err)
-				}
-			}
-
 		}
 	} else {
 		err := retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
@@ -308,7 +268,6 @@ func resourceVcdVAppUpdate(d *schema.ResourceData, meta interface{}) error {
 				return fmt.Errorf(errorCompletingTask, err)
 			}
 		}
-
 	}
 
 	if d.HasChange("storage_profile") {
@@ -325,10 +284,8 @@ func resourceVcdVAppUpdate(d *schema.ResourceData, meta interface{}) error {
 		}
 	}
 
-	if d.HasChange("memory") || d.HasChange("cpus") || d.HasChange("power_on") || d.HasChange("ovf") {
-
+	if d.HasChange("memory") || d.HasChange("cpus") || d.HasChange("power_on") || d.HasChange("ovf") || d.HasChange("disk") || d.HasChange("initscript") {
 		if status != "POWERED_OFF" {
-
 			task, err := vapp.PowerOff()
 			if err != nil {
 				// can't *always* power off an empty vApp so not necesarrily an error
@@ -342,6 +299,7 @@ func resourceVcdVAppUpdate(d *schema.ResourceData, meta interface{}) error {
 				if err != nil {
 					return fmt.Errorf(errorCompletingTask, err)
 				}
+				status, _ = vapp.GetStatus()
 			}
 		}
 
@@ -373,14 +331,17 @@ func resourceVcdVAppUpdate(d *schema.ResourceData, meta interface{}) error {
 			}
 		}
 
-		if d.Get("power_on").(bool) {
-			task, err := vapp.PowerOn()
+		if d.HasChange("disk") {
+			err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
+				task, err := vapp.ChangeDiskSize(0, 0, d.Get("disk").(int))
+				if err != nil {
+					return resource.RetryableError(fmt.Errorf("error changing disk size: %#v", err))
+				}
+
+				return resource.RetryableError(task.WaitTaskCompletion())
+			})
 			if err != nil {
-				return fmt.Errorf("error Powering Up: %#v", err)
-			}
-			err = task.WaitTaskCompletion()
-			if err != nil {
-				return fmt.Errorf("error completing tasks: %#v", err)
+				return fmt.Errorf(errorCompletingTask, err)
 			}
 		}
 
@@ -398,6 +359,32 @@ func resourceVcdVAppUpdate(d *schema.ResourceData, meta interface{}) error {
 			}
 		}
 
+		if initscript, ok := d.GetOk("initscript"); ok {
+			err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
+				log.Printf("running customisation script")
+				task, err := vapp.RunCustomizationScript(d.Get("name").(string), initscript.(string))
+				if err != nil {
+					return resource.RetryableError(fmt.Errorf("error with setting init script: %#v", err))
+				}
+				return resource.RetryableError(task.WaitTaskCompletion())
+			})
+			if err != nil {
+				return fmt.Errorf(errorCompletingTask, err)
+			}
+		}
+	}
+
+	if status == "POWERED_OFF" {
+		if d.Get("power_on").(bool) {
+			task, err := vapp.PowerOn()
+			if err != nil {
+				return fmt.Errorf("error Powering Up: %#v", err)
+			}
+			err = task.WaitTaskCompletion()
+			if err != nil {
+				return fmt.Errorf("error completing tasks: %#v", err)
+			}
+		}
 	}
 
 	return resourceVcdVAppRead(d, meta)

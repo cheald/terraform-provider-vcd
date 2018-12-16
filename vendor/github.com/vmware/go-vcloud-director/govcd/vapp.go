@@ -10,9 +10,10 @@ import (
 	"fmt"
 	"net/url"
 
+	"strconv"
+
 	types "github.com/vmware/go-vcloud-director/types/v56"
 	"github.com/vmware/go-vcloud-director/util"
-	"strconv"
 )
 
 type VApp struct {
@@ -602,6 +603,16 @@ func (vapp *VApp) ChangeCPUcount(size int) (Task, error) {
 	// The request was successful
 	return *task, nil
 
+}
+
+func (vapp *VApp) ChangeDiskSize(vmIndex int, index int, size int) (Task, error) {
+	err := vapp.Refresh()
+	if err != nil {
+		return Task{}, fmt.Errorf("error refreshing vapp before running disk customization: %v", err)
+	}
+
+	vm := vapp.VApp.Children.VM[vmIndex]
+	return (&VM{VM: vm, client: vapp.client}).ChangeDiskSize(index, size)
 }
 
 func (vapp *VApp) ChangeStorageProfile(name string) (Task, error) {
