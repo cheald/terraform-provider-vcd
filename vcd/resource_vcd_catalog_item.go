@@ -248,7 +248,7 @@ func createOrUpdateCatalogItemMetadata(d *schema.ResourceData, meta interface{})
 //
 // Example import path (id): org_name.catalog_name.catalog_item_name
 func resourceVcdCatalogItemImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	resourceURI := strings.Split(d.Id(), ".")
+	resourceURI := strings.SplitN(d.Id(), ".", 3)
 	if len(resourceURI) != 3 {
 		return nil, fmt.Errorf("resource name must be specified as org.catalog.catalog_item")
 	}
